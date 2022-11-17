@@ -3,200 +3,177 @@ use std::fs;
 use std::thread::current;
 
 fn main() {
-    let mut state = State::Scanning;
-
     let file_path = "hello.jnk";
 
     let contents = fs::read_to_string(file_path)
         .expect("Should have been able to read the file");
 
-    let mut start = 0;
-    let mut end = 1;
 
-    let mut tokens:Vec<Token> = Vec::new();
-
-    while end <= contents.len() {
-        let slice = String::from(&contents[start..end]);
-        let current = &contents[end-1..end];
-
-        match state {
-            State::Scanning => {
-                if is_alpha(&slice) {
-                    state = State::Identifier;
-                } else if is_number(current) {
-                    state = State::Int;
-                } else if is_operator(current) {
-                    state = State::Operator;
-                }
-
-                if is_end_of_token(current) {
-                    state.is_end_of_token();
-                    continue;
-                }
-
-
-                if current == "\"" {
-                    state = State::Str;
-                }
-
-                if current == "'" {
-                    state = State::Char;
-                }
-
-            },
-            State::Int => {
-                if current == "." {
-                    state = State::Double;
-                }
-                if is_end_of_token(current) {
-                    state.is_end_of_token();
-                    tokens.push(
-                        Token {
-                            token_type: TokenType::Int,
-                            value: clean_string(&slice)
-                        }
-                    );
-                    continue;                
-                }
-            },
-            State::Double => {
-                if is_end_of_token(current) {
-                    state.is_end_of_token();
-                    tokens.push(
-                        Token {
-                            token_type: TokenType::Double,
-                            value: clean_string(&slice)
-                        }
-                    );
-                    continue;                
-                }
-            }
-            State::Identifier => {
-                if is_keyword(&slice) {
-                    state = State::Keyword;
-                    end += 1;
-                    continue;
-                }
-                if is_end_of_token(current) {
-                    state.is_end_of_token();
-                    tokens.push(
-                        Token {
-                            token_type: TokenType::Identifier,
-                            value: clean_string(&slice)
-                        }
-                    );
-                    continue;                
-                }
-            }
-            State::Str => {
-                if current == "\"" {
-                    state = State::Scanning;
-                    state.is_end_of_token();
-                    tokens.push(
-                        Token {
-                            token_type: TokenType::Str,
-                            //Ignore opening and closing quotes
-                            value: String::from(&contents[start+1..end-1])
-                        }
-                    );
-                    continue;
-                }
-            },
-            State::Char => {
-                if current == "'" {
-                    state = State::Scanning;
-                    state.is_end_of_token();
-                    tokens.push(
-                        Token {
-                            token_type: TokenType::Char,
-                            //Ignore opening and closing quotes
-                            value: String::from(&contents[start+1..end-1])
-                        }
-                    );
-                    continue;
-                }
-            }
-            State::Operator => {
-                if is_end_of_token(current) || is_alpha(current) || is_number(current) {
-                    state.is_end_of_token();
-                    tokens.push(
-                        Token {
-                            token_type: TokenType::Operator,
-                            value: clean_string(&slice)
-                        }
-                    );
-                    continue;             
-                } else if is_operator(current) {
-                    
-                }
-                else {
-                    state = State::Identifier;
-                }
-            },
-            State::Seperator => {
-
-            },
-            State::Keyword => {
-                if is_end_of_token(current) {
-                    state.is_end_of_token();
-                    tokens.push(
-                        Token {
-                            token_type: TokenType::Keyword,
-                            value: clean_string(&slice)
-                        }
-                    );
-                    continue;                
-                } else {
-                    state = State::Identifier;
-                }
-            },
-            State::EndOfToken => {
-                start = end;
-                state.reset();
-            }
-        }
-
-        println!("{:?}", state);
-        println!("{:?}", slice);
-
-        end += 1;
-    }
+    let mut tokenizer = Tokenizer::create_tokenizer(contents);
+    tokenizer.tokenize();
+    let tokens: Vec<Token> = tokenizer.get_tokens();
 
     let x = 1;
 }
 
+struct Tokenizer {
+    state: State,
+    tokens:Vec<Token>,
+    current_char: usize,
+    start_char: usize,
+    contents: String
+}
+
+impl Tokenizer {
+    fn create_tokenizer(contents: String) -> Tokenizer {
+        let mut state = State::Start;
+        let mut tokens:Vec<Token> = Vec::new();
+
+        Tokenizer { 
+            state: state,
+            tokens: tokens,
+            current_char: 0,
+            start_char: 0,
+            contents: contents
+        }
+    }
+
+    fn tokenize(&mut self) {
+        while self.tokens_exist() {
+            match self.state {
+                State::Start => {
+                    self.next_character();
+                    if is_operator(self.get_current_char()) {
+                        self.transition(State::Operator);
+                    }
+                    if is_seperator(self.get_current_char()) {
+                        self.transition(State::Seperator);
+                    }
+                    if is_alpha(self.get_current_char()) {
+                        self.transition(State::Identifier);
+                    }
+                    if is_number(self.get_current_char()) {
+                        self.transition(State::Number)
+                    }
+                },
+                State::Final => {
+                    self.start_char = self.current_char;
+                    self.state.transition(State::Start);
+                },
+                State::Operator => {
+                    if is_operator(self.look_ahead()) {
+                        self.next_character();
+                    } else {
+                        self.tokens.push(self.create_token(TokenType::Operator, self.get_window()));
+                        self.transition(State::Final);
+                    }
+                },
+                State::Seperator => {
+                    self.tokens.push(self.create_token(TokenType::Seperator, self.get_window()));
+                    self.transition(State::Final);
+                },
+                State::Identifier => {
+                    if is_alphanumeric(self.look_ahead()) {
+                        self.next_character();
+                    }
+                    else if is_keyword(self.get_window()) {
+                        self.transition(State::Keyword);
+                    }
+                    else {
+                        self.tokens.push(self.create_token(TokenType::Identifier, self.get_window()));
+                        self.transition(State::Final);
+                    }
+                },
+                State::Keyword => {
+                    self.tokens.push(self.create_token(TokenType::Keyword, self.get_window()));
+                    self.transition(State::Final);
+                },
+                State::Number => {
+                    if is_number(self.look_ahead()) {
+                        self.next_character();
+                    }
+                    else {
+                        self.tokens.push(self.create_token(TokenType::Identifier, self.get_window()));
+                        self.transition(State::Final);
+                    }
+                }
+            }
+        }
+    }
+
+    //TODO Handle unwrap
+    fn tokens_exist(&self) -> bool {
+        self.current_char < self.contents.len().try_into().unwrap() || !matches!(self.state, State::Final)
+    }
+
+    fn next_character(&mut self) {
+        self.current_char += 1;
+    }
+
+    //TODO Catch overflows
+    fn look_ahead(&self) -> &str {
+        self.get_char_at(self.current_char, self.current_char + 1)
+    }
+
+    fn get_tokens(self) -> Vec<Token> {
+        self.tokens
+    }
+
+    fn transition(&mut self, state: State) {
+        self.state.transition(state);
+    }
+
+    fn get_current_char(&self) -> &str {
+        self.get_char_at(self.current_char - 1, self.current_char)
+    }
+
+    fn get_window(&self) -> &str {
+        self.get_char_at(self.start_char, self.current_char)
+    }
+
+    fn get_char_at(&self, start:usize, end:usize) -> &str {
+        match self.contents.get(start..end) {
+            Some(slice) => {
+                slice
+            },
+            None => {
+                ""
+            }
+        }
+    }
+
+    fn create_token(&self, token_type: TokenType, value: &str) -> Token {
+        let token_value =  String::from(value);
+        Token {
+            token_type: token_type,
+            value: token_value
+        }
+    }
+
+}
+
 #[derive(Debug)]
 enum State {
-    Scanning,
-    Str,
-    Keyword,
-    Char,
-    Int,
-    Double,
-    Identifier,
+    Start,
+    Final,
     Operator,
     Seperator,
-    EndOfToken
+    Identifier,
+    Keyword,
+    Number
 }
 
 impl State {
-    fn reset(&mut self) {
-        *self = State::Scanning;
-    }
-
-    fn is_end_of_token(&mut self) {
-        *self = State::EndOfToken;
+    fn transition(&mut self, transition_state: State) {
+        *self = transition_state;
     }
 }
 
 enum TokenType {
     Keyword,
-    Str,
     Identifier,
-    Int,
-    Double,
-    Char,
-    Operator
+    Operator,
+    Seperator
 }
 
 struct Token {
@@ -230,11 +207,20 @@ fn is_alpha(current_char: &str) -> bool {
     return false;
 }
 
+fn is_alphanumeric(current_char: &str) -> bool {
+    for character in current_char.chars() {
+        return character.is_alphanumeric();
+    }
+    return false;
+}
+
+//TODO Put these in a constructor so they are only initialized once
 fn is_operator(current_char: &str) -> bool {
-    let keyword = HashSet::from(["=","==","<",">","<=",">=","!="]);
+    let keyword = HashSet::from(["=","==","<",">","<=",">=","!=","+","-","*","=>"]);
     return keyword.contains(current_char);
 }
 
-fn clean_string(current_slice:&str) -> String{
-    current_slice.replace(" ", "").replace(";", "")
+fn is_seperator(current_char: &str) -> bool {
+    let keyword = HashSet::from(["(",")","{","}"," ",";"]);
+    return keyword.contains(current_char);
 }
