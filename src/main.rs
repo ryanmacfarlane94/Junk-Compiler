@@ -13,7 +13,9 @@ fn main() {
     tokenizer.tokenize();
     let tokens: Vec<Token> = tokenizer.get_tokens();
 
-    let x = 1;
+    for token in tokens {
+        println!("{:?}",token);
+    }
 }
 
 struct Tokenizer {
@@ -80,6 +82,7 @@ impl Tokenizer {
                         self.transition(State::Keyword);
                     }
                     else {
+                        let x = self.get_window();
                         self.tokens.push(self.create_token(TokenType::Identifier, self.get_window()));
                         self.transition(State::Final);
                     }
@@ -89,11 +92,24 @@ impl Tokenizer {
                     self.transition(State::Final);
                 },
                 State::Number => {
-                    if is_number(self.look_ahead()) {
+                    if is_number(self.look_ahead())  {
+                        self.next_character();
+                    }
+                    else if self.look_ahead() == "." {
+                        self.transition(State::Decimal);
                         self.next_character();
                     }
                     else {
-                        self.tokens.push(self.create_token(TokenType::Identifier, self.get_window()));
+                        self.tokens.push(self.create_token(TokenType::Number, self.get_window()));
+                        self.transition(State::Final);
+                    }
+                },
+                State::Decimal => {
+                    if is_number(self.look_ahead())  {
+                        self.next_character();
+                    }
+                    else {
+                        self.tokens.push(self.create_token(TokenType::Decimal, self.get_window()));
                         self.transition(State::Final);
                     }
                 }
@@ -143,7 +159,7 @@ impl Tokenizer {
     }
 
     fn create_token(&self, token_type: TokenType, value: &str) -> Token {
-        let token_value =  String::from(value);
+        let token_value =  String::from(str::replace(value,"\n",""));
         Token {
             token_type: token_type,
             value: token_value
@@ -160,7 +176,8 @@ enum State {
     Seperator,
     Identifier,
     Keyword,
-    Number
+    Number,
+    Decimal
 }
 
 impl State {
@@ -169,13 +186,17 @@ impl State {
     }
 }
 
+#[derive(Debug)]
 enum TokenType {
     Keyword,
     Identifier,
     Operator,
-    Seperator
+    Seperator,
+    Number,
+    Decimal
 }
 
+#[derive(Debug)]
 struct Token {
     token_type: TokenType,
     value: String
@@ -223,4 +244,8 @@ fn is_operator(current_char: &str) -> bool {
 fn is_seperator(current_char: &str) -> bool {
     let keyword = HashSet::from(["(",")","{","}"," ",";"]);
     return keyword.contains(current_char);
+}
+
+fn clean() {
+
 }
